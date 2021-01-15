@@ -1,0 +1,116 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model AppConfiguration {
+  id                  Int     @id @default(autoincrement())
+  userId              Int     @unique @map(name: "user_id")
+  User                User    @relation(fields: [userId], references: [id])
+  totalUnit           String  @map(name: "total_unit")
+  itemUnit            String  @map(name: "item_unit")
+  lastList            Int?    @map(name: "last_list")
+  libraryVersion      Int     @default(0) @map(name: "library_version")
+  showSidebar         Boolean @default(true) @map(name: "show_sidebar")
+  showImages          Boolean @default(false) @map(name: "show_images")
+  showPrices          Boolean @default(false) @map(name: "show_prices")
+  showWorn            Boolean @default(false) @map(name: "show_worn")
+  showConsumable      Boolean @default(false) @map(name: "show_consumable")
+  showListDescription Boolean @default(false) @map(name: "show_list_description")
+  currencySymbol      String? @map(name: "currency_symbol")
+
+  @@map(name: "app_configurations")
+}
+
+model Category {
+  id               Int              @id @default(autoincrement())
+  gearListId       Int              @map(name: "gear_list_id")
+  gearLists        GearList         @relation(fields: [gearListId], references: [id])
+  name             String
+  categoryPosition CategoryPosition?
+  items            ItemPosition[]
+
+  @@map(name: "categories")
+}
+
+model CategoryPosition {
+  id         Int      @id @default(autoincrement())
+  categoryId Int      @map(name: "category_id")
+  category   Category @relation(fields: [categoryId], references: [id])
+  gearListId Int      @map(name: "gear_list_id")
+  gearList   GearList @relation(fields: [gearListId], references: [id])
+
+  @@unique([gearListId, categoryId], name: "category_positions_gear_list_id_category_id_key")
+  @@map(name: "category_positions")
+}
+
+model GearListPosition {
+  id         Int      @id @default(autoincrement())
+  gearListId Int      @map(name: "gear_list_id")
+  gearList   GearList @relation(fields: [gearListId], references: [id])
+  userId     Int      @map(name: "user_id")
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, gearListId], name: "gear_list_positions_user_id_gear_list_id_key")
+  @@map(name: "gear_list_positions")
+}
+
+model GearList {
+  id                Int                @id @default(autoincrement())
+  userId            Int                @map(name: "user_id")
+  user              User               @relation(fields: [userId], references: [id])
+  externalId        String?            @map(name: "external_id")
+  name              String
+  description       String?
+  categories        Category[]
+  categoryPositions CategoryPosition[]
+  gearListPosition  GearListPosition?
+
+  @@map(name: "gear_lists")
+}
+
+model ItemPosition {
+  id         Int      @id @default(autoincrement())
+  categoryId Int      @map(name: "category_id")
+  category   Category @relation(fields: [categoryId], references: [id])
+  itemId     Int      @map(name: "item_id")
+  item       Item     @relation(fields: [itemId], references: [id])
+
+  @@unique([categoryId, itemId], name: "item_positions_category_id_item_id_key")
+  @@map(name: "item_positions")
+}
+
+model Item {
+  id            Int            @id @default(autoincrement())
+  userId        Int            @map(name: "user_id")
+  user          User           @relation(fields: [userId], references: [id])
+  name          String
+  description   String?
+  weight        Float          @default(0.00)
+  weightUnit    String         @map(name: "weight_unit")
+  price         String?
+  imageUrl      String?        @map(name: "image_url")
+  url           String?
+  itemPositions ItemPosition[]
+
+  @@map(name: "items")
+}
+
+model User {
+  id                Int                @id @default(autoincrement())
+  username          String             @unique
+  email             String
+  passwordHash      String             @map(name: "password_hash")
+  token             String?
+  syncToken        Int?            @map(name: "sync_token")
+  appConfiguration  AppConfiguration?
+  gearListPositions GearListPosition[]
+  gearLists         GearList[]
+  items             Item[]
+
+  @@map(name: "users")
+}
