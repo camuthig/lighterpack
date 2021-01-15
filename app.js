@@ -23,9 +23,12 @@ const endpoints = require('./server/endpoints.js');
 const moderationEndpoints = require('./server/moderation-endpoints.js');
 const views = require('./server/views.js');
 
+const endpointsV2 = require('./server/endpoints_v2.js');
+
 app.use('/', endpoints);
 app.use('/', moderationEndpoints);
 app.use('/', views);
+app.use('/v2/', endpointsV2);
 
 console.log('-------');
 console.log(new Date().toString().substr(0, 24));

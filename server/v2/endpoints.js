@@ -10,9 +10,13 @@ const request = require('request');
 const formidable = require('formidable');
 const mongojs = require('mongojs');
 const config = require('config');
-const awesomeLog = require('./log.js');
+const awesomeLog = require('../log.js');
 
 const { authenticateUser, verifyPassword } = require('./auth.js');
+
+const { PrismaClient } = require("@prisma/client")
+
+const prisma = new PrismaClient()
 
 if (config.get('mailgunAPIKey')) {
     var mailgun = require('mailgun-js')({ apiKey: config.get('mailgunAPIKey'), domain: config.get('mailgunDomain') });
@@ -21,17 +25,10 @@ if (config.get('mailgunAPIKey')) {
 const collections = ['users', 'libraries'];
 const db = mongojs(config.get('databaseUrl'), collections);
 
-const dataTypes = require('../client/dataTypes.js');
-
-const Item = dataTypes.Item;
-const Category = dataTypes.Category;
-const List = dataTypes.List;
-const Library = dataTypes.Library;
-
 // one day in many years this can go away.
 eval(`${fs.readFileSync(path.join(__dirname, './sha3.js'))}`);
 
-router.post('/register', (req, res) => {
+router.post('/register', async (req, res) => {
     let username = String(req.body.username).toLowerCase().trim();
     const password = String(req.body.password);
     let email = String(req.body.email);
@@ -66,48 +63,40 @@ router.post('/register', (req, res) => {
 
     awesomeLog(req, username);
 
-    db.users.find({ username }, (err, users) => {
-        if (err || users.length) {
-            awesomeLog(req, 'User exists.');
-            return res.status(400).json({ errors: [{ field: 'username', message: 'That username already exists, please pick a different username.' }] });
-        }
+    let existingUser = await prisma.user.findFirst({ where: { username } });
+    if (existingUser) {
+        awesomeLog(req, 'User exists.');
+        return res.status(400).json({ errors: [{ field: 'username', message: 'That username already exists, please pick a different username.' }] });
+    }
 
-        db.users.find({ email }, (err, users) => {
-            if (err || users.length) {
-                awesomeLog(req, 'User email exists.');
-                return res.status(400).json({ errors: [{ field: 'email', message: 'A user with that email already exists.' }] });
-            }
 
-            bcrypt.genSalt(10, (err, salt) => {
-                bcrypt.hash(password, salt, (err, hash) => {
-                    crypto.randomBytes(48, (ex, buf) => {
-                        const token = buf.toString('hex');
-                        let library;
-                        if (req.body.library) {
-                            try {
-                                library = JSON.parse(req.body.library);
-                            } catch (e) {
-                                return res.status(400).json({ errors: [{ message: 'Unable to parse your library. Contact support.' }] });
-                            }
-                        } else {
-                            library = new Library().save();
-                        }
+    existingUser = await prisma.user.findFirst({ where: { email } });
+    if (existingUser) {
+        awesomeLog(req, 'User email exists.');
+        return res.status(400).json({ errors: [{ field: 'email', message: 'A user with that email already exists.' }] });
+    }
 
-                        const newUser = {
-                            username,
-                            password: hash,
-                            email,
-                            token,
-                            library,
-                            syncToken: 0,
-                        };
-                        awesomeLog(req, 'Saving new user.');
-                        db.users.save(newUser);
-                        const out = { username, library: JSON.stringify(newUser.library), syncToken: 0 };
-                        res.cookie('lp', token, { path: '/', maxAge: 365 * 24 * 60 * 1000 });
-                        return res.status(200).json(out);
-                    });
-                });
+    bcrypt.genSalt(10, async (err, salt) => {
+        bcrypt.hash(password, salt, async (err, hash) => {
+            crypto.randomBytes(48, async (ex, buf) => {
+                const token = buf.toString('hex');
+
+                awesomeLog(req, 'Creating new user.');
+
+                await prisma.user.create({
+                    data: {
+                        username,
+                        passwordHash: hash,
+                        email,
+                        token,
+                        syncToken: 0,
+                        // TODO Add app configuration creation here
+                    }
+                  })
+
+                const out = { username, syncToken: 0 };
+                res.cookie('lp', token, { path: '/', maxAge: 365 * 24 * 60 * 1000 });
+                return res.status(200).json(out);
             });
         });
     });
@@ -168,6 +157,7 @@ router.post('/externalId', (req, res) => {
 });
 
 function externalId(req, res, user) {
+    // TODO This should save the external ID directly to a gear list instead for transaction support.
     const id = generate('1234567890abcdefghijklmnopqrstuvwxyz', 6);
     awesomeLog(req, `Id generated: ${id}`);
 
@@ -308,7 +298,7 @@ function account(req, res, user) {
                 if (errors.length) {
                     return res.status(400).json({ errors });
                 }
-                
+
                 bcrypt.genSalt(10, (err, salt) => {
                     bcrypt.hash(newPassword, salt, (err, hash) => {
                         user.password = hash;
