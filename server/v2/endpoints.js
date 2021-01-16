@@ -26,7 +26,7 @@ const collections = ['users', 'libraries'];
 const db = mongojs(config.get('databaseUrl'), collections);
 
 // one day in many years this can go away.
-eval(`${fs.readFileSync(path.join(__dirname, './sha3.js'))}`);
+eval(`${fs.readFileSync(path.join(__dirname, '../sha3.js'))}`);
 
 router.post('/register', async (req, res) => {
     let username = String(req.body.username).toLowerCase().trim();
@@ -182,7 +182,7 @@ function externalId(req, res, user) {
     });
 }
 
-router.post('/forgotPassword', (req, res) => {
+router.post('/forgotPassword', async (req, res) => {
     awesomeLog(req);
     let username = String(req.body.username).toLowerCase().trim();
     if (!username || username.length < 1 || username.length > 32) {
@@ -190,52 +190,60 @@ router.post('/forgotPassword', (req, res) => {
         return res.status(400).json({ errors: [{ message: 'Please enter a username.' }] });
     }
 
-    db.users.find({ username }, (err, users) => {
-        if (err) {
-            awesomeLog(req, `Forgot password lookup error for:${username}`);
-            return res.status(500).json({ message: 'An error occurred' });
-        } if (!users.length) {
-            awesomeLog(req, `Forgot password for unknown user:${username}`);
-            return res.status(500).json({ message: 'An error occurred.' });
-        }
-        const user = users[0];
-        require('crypto').randomBytes(12, (ex, buf) => {
-            const newPassword = buf.toString('hex');
+    let user = await prisma.user.findUnique({ where: { username } });
 
-            bcrypt.genSalt(10, (err, salt) => {
-                bcrypt.hash(newPassword, salt, (err, hash) => {
-                    user.password = hash;
-                    const email = user.email;
+    if (!user) {
+        awesomeLog(req, `Forgot password for unknown user:${username}`);
+        return res.status(500).json({ message: 'An error occurred.' });
+    }
 
-                    const message = `Hello ${username},\n Apparently you forgot your password. Here's your new one: \n\n Username: ${username}\n Password: ${newPassword}\n\n If you continue to have problems, please reply to this email with details.\n\n Thanks!`;
+    require('crypto').randomBytes(12, async (ex, buf) => {
+        const newPassword = buf.toString('hex');
 
-                    const mailOptions = {
-                        from: 'LighterPack <info@mg.lighterpack.com>',
-                        to: email,
-                        "h:Reply-To": "LighterPack <info@lighterpack.com>",
-                        subject: 'Your new LighterPack password',
-                        text: message,
-                    };
+        bcrypt.genSalt(10, async (err, salt) => {
+            bcrypt.hash(newPassword, salt, async (err, hash) => {
+                user.password = hash;
+                const email = user.email;
 
-                    awesomeLog(req, `Attempting to send new password to:${email}`);
-                    mailgun.messages().send(mailOptions, (error, response) => {
-                        if (error) {
-                            awesomeLog(req, error);
-                            return res.status(500).json({ message: 'An error occurred' });
-                        }
-                        db.users.save(user);
-                        const out = { username };
+                const message = `Hello ${username},\n Apparently you forgot your password. Here's your new one: \n\n Username: ${username}\n Password: ${newPassword}\n\n If you continue to have problems, please reply to this email with details.\n\n Thanks!`;
+
+                const mailOptions = {
+                    from: 'LighterPack <info@mg.lighterpack.com>',
+                    to: email,
+                    "h:Reply-To": "LighterPack <info@lighterpack.com>",
+                    subject: 'Your new LighterPack password',
+                    text: message,
+                };
+
+                awesomeLog(req, `Attempting to send new password to:${email}`);
+
+                if (mailgun) {
+                    try {
+                        const response = await mailgun.messages().send(mailOptions);
                         awesomeLog(req, `Message sent: ${response.message}`);
-                        awesomeLog(req, `password changed for user:${username}`);
-                        return res.status(200).json(out);
-                    });
+                    } catch (err) {
+                        awesomeLog(req, error);
+                        return res.status(500).json({ message: 'An error occurred' });
+                    }
+                } else {
+                    awesomeLog(req, 'Not sending message because mailgun is not configured');
+                    awesomeLog(req, mailOptions);
+                }
+
+                await prisma.user.update({
+                    where: { id: user.id },
+                    data: { passwordHash: hash },
                 });
+
+                const out = { username };
+                awesomeLog(req, `password changed for user:${username}`);
+                return res.status(200).json(out);
             });
         });
     });
 });
 
-router.post('/forgotUsername', (req, res) => {
+router.post('/forgotUsername', async (req, res) => {
     awesomeLog(req);
     let email = String(req.body.email).toLowerCase().trim();
     if (!email || email.length < 1) {
@@ -243,39 +251,43 @@ router.post('/forgotUsername', (req, res) => {
         return res.status(400).json({ errors: [{ message: 'Please enter a valid email.' }] });
     }
 
-    db.users.find({ email }, (err, users) => {
-        if (err) {
-            awesomeLog(req, `Forgot email lookup error for:${email}`);
-            return res.status(500).json({ message: 'An error occurred' });
-        } if (!users.length) {
-            awesomeLog(req, `Forgot email for unknown user:${email}`);
-            return res.status(400).json({ message: 'An error occurred' });
-        }
-        const user = users[0];
-        const username = user.username;
+    let user = await prisma.user.findFirst({ where: { email } });
 
-        const message = `Hello ${username},\n Apparently you forgot your username. Here It is: \n\n Username: ${username}\n\n If you continue to have problems, please reply to this email with details.\n\n Thanks!`;
+    if (!user) {
+        awesomeLog(req, `Forgot email for unknown user:${email}`);
+        return res.status(400).json({ message: 'An error occurred' });
+    }
 
-        const mailOptions = {
-            from: 'LighterPack <info@mg.lighterpack.com>',
-            to: email,
-            "h:Reply-To": "LighterPack <info@lighterpack.com>",
-            subject: 'Your LighterPack username',
-            text: message,
-        };
+    const username = user.username;
 
-        awesomeLog(req, `Attempting to send username to:${email}`);
-        mailgun.messages().send(mailOptions, (error, response) => {
-            if (error) {
-                awesomeLog(req, error);
-                return res.status(500).json({ message: 'An error occurred' });
-            }
-            const out = { email };
+    const message = `Hello ${username},\n Apparently you forgot your username. Here It is: \n\n Username: ${username}\n\n If you continue to have problems, please reply to this email with details.\n\n Thanks!`;
+
+    const mailOptions = {
+        from: 'LighterPack <info@mg.lighterpack.com>',
+        to: email,
+        "h:Reply-To": "LighterPack <info@lighterpack.com>",
+        subject: 'Your LighterPack username',
+        text: message,
+    };
+
+    awesomeLog(req, `Attempting to send username to:${email}`);
+
+    if (mailgun) {
+        try {
+            const response = await mailgun.messages().send(mailOptions);
             awesomeLog(req, `Message sent: ${response.message}`);
-            awesomeLog(req, `sent username message for user:${username}`);
-            return res.status(200).json(out);
-        });
-    });
+        } catch (err) {
+            awesomeLog(req, error);
+            return res.status(500).json({ message: 'An error occurred' });
+        }
+    } else {
+        awesomeLog(req, 'Not sending message because mailgun is not configured');
+        awesomeLog(req, mailOptions);
+    }
+
+    const out = { email };
+    awesomeLog(req, `sent username message for user:${username}`);
+    return res.status(200).json(out);
 });
 
 router.post('/account', (req, res) => {
@@ -299,9 +311,9 @@ function account(req, res, user) {
                     return res.status(400).json({ errors });
                 }
 
-                bcrypt.genSalt(10, (err, salt) => {
-                    bcrypt.hash(newPassword, salt, (err, hash) => {
-                        user.password = hash;
+                bcrypt.genSalt(10, async (err, salt) => {
+                    bcrypt.hash(newPassword, salt, async (err, hash) => {
+                        user.passwordHash = hash;
                         awesomeLog(req, `Changing PW - ${user.username}`);
 
                         if (req.body.newEmail) {
@@ -309,14 +321,22 @@ function account(req, res, user) {
                             awesomeLog(req, `Changing Email - ${user.username}`);
                         }
 
-                        db.users.save(user);
+                        await prisma.user.update({
+                            where: { id: user.id },
+                            data: {
+                                passwordHash: user.passwordHash,
+                                email: user.email,
+                            },
+                        })
                         return res.status(200).json({ message: 'success' });
                     });
                 });
             } else if (req.body.newEmail) {
-                user.email = String(req.body.newEmail);
                 awesomeLog(req, `Changing Email - ${user.username}`);
-                db.users.save(user);
+                prisma.user.update({
+                    where: { id: user.id },
+                    data: { email: String(req.body.newEmail) },
+                })
                 return res.status(200).json({ message: 'success' });
             }
         })
@@ -331,16 +351,17 @@ router.post('/delete-account', (req, res) => {
 
 function deleteAccount(req, res, user) {
     verifyPassword(user.username, String(req.body.password))
-        .then((user) => {
+        .then(async (user) => {
             if (req.body.username !== user.username) {
                 return Promise.reject(new Error('An error occurred, please try logging out and in again.'));
             }
 
-            db.users.remove(user, true);
+            await prisma.user.delete({ where: { id: user.id } })
 
             return res.status(200).json({ message: 'success' });
         })
         .catch((err) => {
+            awesomeLog(req, err);
             res.status(400).json({ errors: [{ field: 'currentPassword', message: 'Your current password is incorrect.' }] });
         });
 }

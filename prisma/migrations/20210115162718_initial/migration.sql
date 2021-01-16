@@ -3,7 +3,7 @@ CREATE TABLE users (
     username VARCHAR(255) NOT NULL UNIQUE,
     email VARCHAR(255) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    token VARCHAR(255),
+    token VARCHAR(255) UNIQUE,
     sync_token INTEGER
 );
 

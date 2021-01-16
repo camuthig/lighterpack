@@ -27,9 +27,9 @@ model AppConfiguration {
 }
 
 model Category {
-  id               Int              @id @default(autoincrement())
-  gearListId       Int              @map(name: "gear_list_id")
-  gearLists        GearList         @relation(fields: [gearListId], references: [id])
+  id               Int               @id @default(autoincrement())
+  gearListId       Int               @map(name: "gear_list_id")
+  gearLists        GearList          @relation(fields: [gearListId], references: [id])
   name             String
   categoryPosition CategoryPosition?
   items            ItemPosition[]
@@ -105,8 +105,8 @@ model User {
   username          String             @unique
   email             String
   passwordHash      String             @map(name: "password_hash")
-  token             String?
-  syncToken        Int?            @map(name: "sync_token")
+  token             String?            @unique
+  syncToken         Int?               @map(name: "sync_token")
   appConfiguration  AppConfiguration?
   gearListPositions GearListPosition[]
   gearLists         GearList[]
