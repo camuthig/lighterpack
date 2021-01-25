@@ -9,12 +9,12 @@ datasource db {
 
 model AppConfiguration {
   id                  Int     @id @default(autoincrement())
-  userId              Int     @unique @map(name: "user_id")
-  User                User    @relation(fields: [userId], references: [id])
+  userId              Int?    @unique @map(name: "user_id")
+  User                User?   @relation(fields: [userId], references: [id])
   totalUnit           String  @map(name: "total_unit")
   itemUnit            String  @map(name: "item_unit")
   lastList            Int?    @map(name: "last_list")
-  libraryVersion      Int     @default(0) @map(name: "library_version")
+  idSequence          Int     @default(0) @map(name: "id_sequence")
   showSidebar         Boolean @default(true) @map(name: "show_sidebar")
   showImages          Boolean @default(false) @map(name: "show_images")
   showPrices          Boolean @default(false) @map(name: "show_prices")
@@ -27,76 +27,113 @@ model AppConfiguration {
 }
 
 model Category {
-  id               Int               @id @default(autoincrement())
-  gearListId       Int               @map(name: "gear_list_id")
-  gearLists        GearList          @relation(fields: [gearListId], references: [id])
-  name             String
+  id                Int       @id @default(autoincrement())
+  libraryId         Int       @map(name: "library_id")
+  userId            Int?      @map(name: "user_id")
+  user              User?     @relation(fields: [userId], references: [id])
+  gearListLibraryId Int?      @map(name: "gear_list_library_id")
+  gearList          GearList? @relation(fields: [userId, gearListLibraryId], references: [userId, libraryId])
+  name              String
+
+  subtotalWeight           Float @map(name: "subtotal_weight")
+  subtotalWornWeight       Float @map(name: "subtotal_worn_weight")
+  subtotalConsumableWeight Float @map(name: "subtotal_consumable_weight")
+  subtotalPrice            Float @map(name: "subtotal_price")
+  subtotalConsumablePrice  Float @map(name: "subtotal_consumable_price")
+  subtotalQty              Int   @map(name: "subtotal_qty")
+
   categoryPosition CategoryPosition?
   items            ItemPosition[]
 
+  @@unique([userId, libraryId])
   @@map(name: "categories")
 }
 
 model CategoryPosition {
-  id         Int      @id @default(autoincrement())
-  categoryId Int      @map(name: "category_id")
-  category   Category @relation(fields: [categoryId], references: [id])
-  gearListId Int      @map(name: "gear_list_id")
-  gearList   GearList @relation(fields: [gearListId], references: [id])
+  id                Int       @id @default(autoincrement())
+  userId            Int?      @map(name: "user_id")
+  user              User?     @relation(fields: [userId], references: [id])
+  categoryLibraryId Int?      @map(name: "category_library_id")
+  category          Category? @relation(fields: [categoryLibraryId, userId], references: [libraryId, userId])
+  gearListLibraryId Int?      @map(name: "gear_list_library_id")
+  gearList          GearList? @relation(fields: [gearListLibraryId, userId], references: [libraryId, userId])
+  position          Int
 
-  @@unique([gearListId, categoryId], name: "category_positions_gear_list_id_category_id_key")
+  @@unique([userId, gearListLibraryId, categoryLibraryId])
   @@map(name: "category_positions")
 }
 
 model GearListPosition {
-  id         Int      @id @default(autoincrement())
-  gearListId Int      @map(name: "gear_list_id")
-  gearList   GearList @relation(fields: [gearListId], references: [id])
-  userId     Int      @map(name: "user_id")
-  user       User     @relation(fields: [userId], references: [id])
+  id                Int       @id @default(autoincrement())
+  gearListLibraryId Int?      @map(name: "gear_list_library_id")
+  gearList          GearList? @relation(fields: [userId, gearListLibraryId], references: [userId, libraryId])
+  userId            Int?      @map(name: "user_id")
+  user              User?     @relation(fields: [userId], references: [id])
+  position          Int
 
-  @@unique([userId, gearListId], name: "gear_list_positions_user_id_gear_list_id_key")
+  @@unique([userId, gearListLibraryId], name: "gear_list_positions_user_id_gear_list_id_key")
   @@map(name: "gear_list_positions")
 }
 
 model GearList {
-  id                Int                @id @default(autoincrement())
-  userId            Int                @map(name: "user_id")
-  user              User               @relation(fields: [userId], references: [id])
-  externalId        String?            @map(name: "external_id")
-  name              String
-  description       String?
+  id          Int     @id @default(autoincrement())
+  libraryId   Int     @map(name: "library_id")
+  userId      Int?    @map(name: "user_id")
+  user        User?   @relation(fields: [userId], references: [id])
+  externalId  String? @map(name: "external_id")
+  name        String
+  description String?
+
+  totalWeight           Float @default(0.0) @map(name: "total_weight")
+  totalWornWeight       Float @default(0.0) @map(name: "total_worn_weight")
+  totalConsumableWeight Float @default(0.0) @map(name: "total_consumable_weight")
+  totalBaseWeight       Float @default(0.0) @map(name: "total_base_weight")
+  totalPackWeight       Float @default(0.0) @map(name: "total_pack_weight")
+  totalPrice            Float @default(0.0) @map(name: "total_price")
+  totalConsumablePrice  Float @default(0.0) @map(name: "total_consumable_price")
+  totalQty              Int   @default(0) @map(name: "total_qty")
+
   categories        Category[]
   categoryPositions CategoryPosition[]
   gearListPosition  GearListPosition?
 
+  @@unique([userId, libraryId])
   @@map(name: "gear_lists")
 }
 
 model ItemPosition {
-  id         Int      @id @default(autoincrement())
-  categoryId Int      @map(name: "category_id")
-  category   Category @relation(fields: [categoryId], references: [id])
-  itemId     Int      @map(name: "item_id")
-  item       Item     @relation(fields: [itemId], references: [id])
+  id                Int       @id @default(autoincrement())
+  userId            Int?      @map(name: "user_id")
+  user              User?     @relation(fields: [userId], references: [id])
+  categoryLibraryId Int?      @map(name: "category_library_id")
+  category          Category? @relation(fields: [userId, categoryLibraryId], references: [userId, libraryId])
+  itemLibraryId     Int       @map(name: "item_library_id")
+  position          Int
+  item              Item      @relation(fields: [userId, itemLibraryId], references: [userId, libraryId])
+  isWorn            Boolean   @default(false) @map(name: "is_worn")
+  isConsumable      Boolean   @default(false) @map(name: "is_consumable")
+  qty               Int       @default(1)
+  star              Int       @default(0)
 
-  @@unique([categoryId, itemId], name: "item_positions_category_id_item_id_key")
+  @@unique([userId, categoryLibraryId, itemLibraryId])
   @@map(name: "item_positions")
 }
 
 model Item {
   id            Int            @id @default(autoincrement())
-  userId        Int            @map(name: "user_id")
-  user          User           @relation(fields: [userId], references: [id])
+  libraryId     Int            @map(name: "library_id")
+  userId        Int?           @map(name: "user_id")
+  user          User?          @relation(fields: [userId], references: [id])
   name          String
   description   String?
   weight        Float          @default(0.00)
   weightUnit    String         @map(name: "weight_unit")
-  price         String?
+  price         Float          @default(0.00)
   imageUrl      String?        @map(name: "image_url")
   url           String?
   itemPositions ItemPosition[]
 
+  @@unique([userId, libraryId])
   @@map(name: "items")
 }
 
@@ -113,4 +150,6 @@ model User {
   items             Item[]
 
   @@map(name: "users")
+  CategoryPosition CategoryPosition[]
+  ItemPosition     ItemPosition[]
 }
