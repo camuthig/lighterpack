@@ -17,11 +17,12 @@
   "author": "",
   "license": "GPL-2.0",
   "dependencies": {
-    "axios": "0.18.1",
     "@babel/core": "7.3.4",
-    "babel-loader": "8.0.5",
     "@babel/polyfill": "7.2.5",
     "@babel/preset-env": "7.3.4",
+    "@prisma/client": "^2.14.0",
+    "axios": "0.18.1",
+    "babel-loader": "8.0.5",
     "bcryptjs": "^2.4.3",
     "body-parser": "^1.18.2",
     "compression": "^1.7.3",
@@ -38,6 +39,7 @@
     "mini-css-extract-plugin": "0.6.0",
     "mongojs": "^2.2.2",
     "mustache": "^2.2.1",
+    "nanoid": "2.0.3",
     "node.extend": "^1.1.5",
     "request": "^2.67.0",
     "sass": "1.26.8",
@@ -49,10 +51,10 @@
     "vue-template-compiler": "2.6.11",
     "vuex": "3.0.1",
     "webpack": "4.27.1",
-    "whatwg-fetch": "^2.0.3",
-    "nanoid": "2.0.3"
+    "whatwg-fetch": "^2.0.3"
   },
   "devDependencies": {
+    "@prisma/cli": "^2.14.0",
     "eslint": "5.16.0",
     "eslint-config-airbnb-base": "13.1.0",
     "eslint-plugin-import": "2.17.2",
