@@ -22,10 +22,16 @@ app.use(express.static(`${__dirname}/public/`, { maxAge: oneDay }));
 const endpoints = require('./server/endpoints.js');
 const moderationEndpoints = require('./server/moderation-endpoints.js');
 const views = require('./server/views.js');
+const awesomeLog = require('./server/log.js');
 
 app.use('/', endpoints);
 app.use('/', moderationEndpoints);
 app.use('/', views);
+
+app.use((err, req, res, next) => {
+    awesomeLog(req, err.stack);
+    res.status(500).json({ message: 'An error occurred, please try again later.'});
+})
 
 console.log('-------');
 console.log(new Date().toString().substr(0, 24));

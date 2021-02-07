@@ -18,6 +18,9 @@ if (config.get('mailgunAPIKey')) {
     var mailgun = require('mailgun-js')({ apiKey: config.get('mailgunAPIKey'), domain: config.get('mailgunDomain') });
 }
 
+const { PrismaClient } = require("@prisma/client")
+const prisma = new PrismaClient()
+
 const collections = ['users', 'libraries'];
 const db = mongojs(config.get('databaseUrl'), collections);
 
@@ -31,7 +34,16 @@ const Library = dataTypes.Library;
 // one day in many years this can go away.
 eval(`${fs.readFileSync(path.join(__dirname, './sha3.js'))}`);
 
-router.post('/register', (req, res) => {
+router.post('/register', async (req, res) => {
+    try {
+        registerUser(req, res);
+    } catch (err) {
+        next(err);
+    }
+
+});
+
+async function registerUser(req, res) {
     let username = String(req.body.username).toLowerCase().trim();
     const password = String(req.body.password);
     let email = String(req.body.email);
@@ -66,65 +78,96 @@ router.post('/register', (req, res) => {
 
     awesomeLog(req, username);
 
-    db.users.find({ username }, (err, users) => {
-        if (err || users.length) {
+    try {
+        let existingUser = await prisma.user.findFirst({ where: { username } });
+        if (existingUser) {
             awesomeLog(req, 'User exists.');
             return res.status(400).json({ errors: [{ field: 'username', message: 'That username already exists, please pick a different username.' }] });
         }
 
-        db.users.find({ email }, (err, users) => {
-            if (err || users.length) {
-                awesomeLog(req, 'User email exists.');
-                return res.status(400).json({ errors: [{ field: 'email', message: 'A user with that email already exists.' }] });
-            }
 
-            bcrypt.genSalt(10, (err, salt) => {
-                bcrypt.hash(password, salt, (err, hash) => {
-                    crypto.randomBytes(48, (ex, buf) => {
-                        const token = buf.toString('hex');
-                        let library;
-                        if (req.body.library) {
-                            try {
-                                library = JSON.parse(req.body.library);
-                            } catch (e) {
-                                return res.status(400).json({ errors: [{ message: 'Unable to parse your library. Contact support.' }] });
-                            }
-                        } else {
-                            library = new Library().save();
-                        }
+        existingUser = await prisma.user.findFirst({ where: { email } });
+        if (existingUser) {
+            awesomeLog(req, 'User email exists.');
+            return res.status(400).json({ errors: [{ field: 'email', message: 'A user with that email already exists.' }] });
+        }
+    } catch (err) {
+        awesomeLog(req, err);
+        return res.status(500).json({ message: 'An error occurred. Please try again later.'})
+    }
 
-                        const newUser = {
-                            username,
-                            password: hash,
-                            email,
-                            token,
-                            library,
-                            syncToken: 0,
-                        };
-                        awesomeLog(req, 'Saving new user.');
-                        db.users.save(newUser);
-                        const out = { username, library: JSON.stringify(newUser.library), syncToken: 0 };
-                        res.cookie('lp', token, { path: '/', maxAge: 365 * 24 * 60 * 1000 });
-                        return res.status(200).json(out);
-                    });
+    bcrypt.genSalt(10, async (err, salt) => {
+        bcrypt.hash(password, salt, async (err, hash) => {
+            crypto.randomBytes(48, async (ex, buf) => {
+                const token = buf.toString('hex');
+                let library;
+                if (req.body.library) {
+                    try {
+                        library = JSON.parse(req.body.library);
+                    } catch (e) {
+                        return res.status(400).json({ errors: [{ message: 'Unable to parse your library. Contact support.' }] });
+                    }
+                } else {
+                    library = new Library().save();
+                }
+
+                awesomeLog(req, 'Creating new user in Postgres');
+                await prisma.user.create({
+                    data: {
+                        username,
+                        passwordHash: hash,
+                        email,
+                        token,
+                        syncToken: 0,
+                    },
                 });
+
+                const newUser = {
+                    username,
+                    password: hash,
+                    email,
+                    token,
+                    library,
+                    syncToken: 0,
+                };
+                awesomeLog(req, 'Saving new user library to Mongo.');
+                await db.users.save(newUser);
+                awesomeLog(req, newUser);
+                const out = { username, library: JSON.stringify(newUser.library), syncToken: 0 };
+                res.cookie('lp', token, { path: '/', maxAge: 365 * 24 * 60 * 1000 });
+                return res.status(200).json(out);
             });
         });
     });
-});
+}
 
 router.post('/signin', (req, res) => {
     authenticateUser(req, res, returnLibrary);
 });
 
+function loadMongoUser(req, res, user, callback) {
+    db.users.find({ username: user.username }, (err, users) => {
+        if (err) {
+            awesomeLog(req, `Error loading user from Mongo:${user.username}`);
+            return res.status(500).json({ message: 'An error occurred, please try again later.' });
+        } if (!users || !users.length) {
+            awesomeLog(req, `User not found in Mongo:${user.username}`);
+            return res.status(404).json({ message: 'An error occurred. Please try refreshing your page.' });
+        }
+        callback(users[0]);
+    });
+}
 
 function returnLibrary(req, res, user) {
     awesomeLog(req, user.username);
-    if (!user.syncToken) {
-        user.syncToken = 0;
-        db.users.save(user);
-    }
-    return res.json({ username: user.username, library: JSON.stringify(user.library), syncToken: user.syncToken });
+    return loadMongoUser(req, res, user, function (mongoUser) {
+        if (!mongoUser.syncToken) {
+            mongoUser.syncToken = 0;
+            db.users.save(mongoUser);
+        }
+        awesomeLog(req, mongoUser)
+        return res.json({ username: user.username, library: JSON.stringify(mongoUser.library), syncToken: mongoUser.syncToken });
+    });
 }
 
 router.post('/saveLibrary', (req, res) => {
@@ -132,34 +175,36 @@ router.post('/saveLibrary', (req, res) => {
 });
 
 function saveLibrary(req, res, user) {
-    if (typeof req.body.syncToken === 'undefined') {
-        return res.status(400).send("Please refresh this page to upgrade to the latest version of LighterPack.");
-    }
-    if (!req.body.username || !req.body.data) {
-        return res.status(400).json({ message: 'An error occurred while saving your data. Please refresh your browser and try again.' });
-    }
+    return loadMongoUser(req, res, user, function(mongoUser) {
+        if (typeof req.body.syncToken === 'undefined') {
+            return res.status(400).send("Please refresh this page to upgrade to the latest version of LighterPack.");
+        }
+        if (!req.body.username || !req.body.data) {
+            return res.status(400).json({ message: 'An error occurred while saving your data. Please refresh your browser and try again.' });
+        }
 
-    if (req.body.username != user.username) {
-        return res.status(401).json({ message: 'An error occurred while saving your data. Please refresh your browser and login again.' });
-    }
+        if (req.body.username != user.username) {
+            return res.status(401).json({ message: 'An error occurred while saving your data. Please refresh your browser and login again.' });
+        }
 
-    if (req.body.syncToken != user.syncToken) {
-        return res.status(400).json({ message: 'Your list is out of date - please refresh your browser.' });
-    }
+        if (req.body.syncToken != mongoUser.syncToken) {
+            return res.status(400).json({ message: 'Your list is out of date - please refresh your browser.' });
+        }
 
-    let library;
-    try {
-        library = JSON.parse(req.body.data);
-    } catch (e) {
-        return res.status(400).json({ errors: [{ message: 'An error occurred while saving your data - unable to parse library. If this persists, please contact support.' }] });
-    }
+        let library;
+        try {
+            library = JSON.parse(req.body.data);
+        } catch (e) {
+            return res.status(400).json({ errors: [{ message: 'An error occurred while saving your data - unable to parse library. If this persists, please contact support.' }] });
+        }
 
-    user.library = library;
-    user.syncToken++;
-    db.users.save(user, () => {
-        awesomeLog(req, user.username);
+        mongoUser.library = library;
+        mongoUser.syncToken++;
+        return db.users.save(mongoUser, () => {
+            awesomeLog(req, user.username);
 
-        return res.status(200).json({ message: 'success', syncToken: user.syncToken });
+            return res.status(200).json({ message: 'success', syncToken: mongoUser.syncToken });
+        });
     });
 }
 
@@ -179,12 +224,13 @@ function externalId(req, res, user) {
         }
 
         if (!users.length) {
-            if (typeof user.externalIds === 'undefined') user.externalIds = [id];
-            else user.externalIds.push(id);
-
-            db.users.save(user);
-            awesomeLog(req, `Id: ${id} saved for user ${user.username}`);
-            res.status(200).json({ externalId: id });
+            loadMongoUser(req, res, user, function (mongoUser) {
+                if (typeof user.externalIds === 'undefined') user.externalIds = [id];
+                else user.externalIds.push(id);
+                db.users.save(mongoUser);
+                awesomeLog(req, `Id: ${id} saved for user ${user.username}`);
+                res.status(200).json({ externalId: id });
+            });
         } else {
             awesomeLog(req, `Id collision detected for id: ${id}`);
             externalId(req, res, user);
@@ -192,7 +238,7 @@ function externalId(req, res, user) {
     });
 }
 
-router.post('/forgotPassword', (req, res) => {
+router.post('/forgotPassword', async (req, res) => {
     awesomeLog(req);
     let username = String(req.body.username).toLowerCase().trim();
     if (!username || username.length < 1 || username.length > 32) {
@@ -200,68 +246,87 @@ router.post('/forgotPassword', (req, res) => {
         return res.status(400).json({ errors: [{ message: 'Please enter a username.' }] });
     }
 
-    db.users.find({ username }, (err, users) => {
-        if (err) {
-            awesomeLog(req, `Forgot password lookup error for:${username}`);
-            return res.status(500).json({ message: 'An error occurred' });
-        } if (!users.length) {
-            awesomeLog(req, `Forgot password for unknown user:${username}`);
-            return res.status(500).json({ message: 'An error occurred.' });
-        }
-        const user = users[0];
-        require('crypto').randomBytes(12, (ex, buf) => {
-            const newPassword = buf.toString('hex');
+    let user = await prisma.user.findUnique({ where: { username } });
 
-            bcrypt.genSalt(10, (err, salt) => {
-                bcrypt.hash(newPassword, salt, (err, hash) => {
-                    user.password = hash;
-                    const email = user.email;
+    if (!user) {
+        awesomeLog(req, `Forgot password for unknown user:${username}`);
+        return res.status(500).json({ message: 'An error occurred.' });
+    }
 
-                    const message = `Hello ${username},\n Apparently you forgot your password. Here's your new one: \n\n Username: ${username}\n Password: ${newPassword}\n\n If you continue to have problems, please reply to this email with details.\n\n Thanks!`;
+    require('crypto').randomBytes(12, async (ex, buf) => {
+        const newPassword = buf.toString('hex');
 
-                    const mailOptions = {
-                        from: 'LighterPack <info@mg.lighterpack.com>',
-                        to: email,
-                        "h:Reply-To": "LighterPack <info@lighterpack.com>",
-                        subject: 'Your new LighterPack password',
-                        text: message,
-                    };
+        bcrypt.genSalt(10, async (err, salt) => {
+            bcrypt.hash(newPassword, salt, async (err, hash) => {
+                const email = user.email;
 
-                    awesomeLog(req, `Attempting to send new password to:${email}`);
-                    mailgun.messages().send(mailOptions, (error, response) => {
-                        if (error) {
-                            awesomeLog(req, error);
-                            return res.status(500).json({ message: 'An error occurred' });
-                        }
-                        db.users.save(user);
-                        const out = { username };
+                const message = `Hello ${username},\n Apparently you forgot your password. Here's your new one: \n\n Username: ${username}\n Password: ${newPassword}\n\n If you continue to have problems, please reply to this email with details.\n\n Thanks!`;
+
+                const mailOptions = {
+                    from: 'LighterPack <info@mg.lighterpack.com>',
+                    to: email,
+                    "h:Reply-To": "LighterPack <info@lighterpack.com>",
+                    subject: 'Your new LighterPack password',
+                    text: message,
+                };
+
+                awesomeLog(req, `Attempting to send new password to:${email}`);
+                if (mailgun) {
+                    try {
+                        const response = await mailgun.messages().send(mailOptions);
                         awesomeLog(req, `Message sent: ${response.message}`);
-                        awesomeLog(req, `password changed for user:${username}`);
-                        return res.status(200).json(out);
-                    });
+                    } catch (err) {
+                        awesomeLog(req, error);
+                        return res.status(500).json({ message: 'An error occurred' });
+                    }
+                } else {
+                    awesomeLog(req, 'Not sending message because mailgun is not configured');
+                    awesomeLog(req, mailOptions);
+                }
+
+                await prisma.user.update({
+                    where: {
+                        id: user.id,
+                    },
+                    data: {
+                        passwordHash: hash,
+                    },
                 });
+
+                const out = { username };
+                awesomeLog(req, `password changed for user:${username}`);
+                return res.status(200).json(out);
             });
         });
     });
 });
 
-router.post('/forgotUsername', (req, res) => {
-    awesomeLog(req);
-    let email = String(req.body.email).toLowerCase().trim();
-    if (!email || email.length < 1) {
-        awesomeLog(req, `Bad forgot username:${email}`);
-        return res.status(400).json({ errors: [{ message: 'Please enter a valid email.' }] });
-    }
+router.post('/forgotUsername', async (req, res, next) => {
+    try {
+        let email = String(req.body.email).toLowerCase().trim();
+        if (!email || email.length < 1) {
+            awesomeLog(req, `Bad forgot username:${email}`);
+            return res.status(400).json({ errors: [{ message: 'Please enter a valid email.' }] });
+        }
 
-    db.users.find({ email }, (err, users) => {
-        if (err) {
+        let user = null;
+
+        try {
+            user = await prisma.user.findFirst({
+                where: {
+                    email: email,
+                },
+            });
+        } catch (err) {
             awesomeLog(req, `Forgot email lookup error for:${email}`);
             return res.status(500).json({ message: 'An error occurred' });
-        } if (!users.length) {
+        }
+
+        if (!user) {
             awesomeLog(req, `Forgot email for unknown user:${email}`);
             return res.status(400).json({ message: 'An error occurred' });
         }
-        const user = users[0];
+
         const username = user.username;
 
         const message = `Hello ${username},\n Apparently you forgot your username. Here It is: \n\n Username: ${username}\n\n If you continue to have problems, please reply to this email with details.\n\n Thanks!`;
@@ -275,24 +340,33 @@ router.post('/forgotUsername', (req, res) => {
         };
 
         awesomeLog(req, `Attempting to send username to:${email}`);
-        mailgun.messages().send(mailOptions, (error, response) => {
-            if (error) {
+        if (mailgun) {
+            try {
+                const response = await mailgun.messages().send(mailOptions);
+                awesomeLog(req, `Message sent: ${response.message}`);
+            } catch (err) {
                 awesomeLog(req, error);
                 return res.status(500).json({ message: 'An error occurred' });
             }
-            const out = { email };
-            awesomeLog(req, `Message sent: ${response.message}`);
-            awesomeLog(req, `sent username message for user:${username}`);
-            return res.status(200).json(out);
-        });
-    });
+        } else {
+            awesomeLog(req, 'Not sending message because mailgun is not configured');
+            awesomeLog(req, mailOptions);
+        }
+
+        const out = { email };
+        awesomeLog(req, `sent username message for user:${username}`);
+        return res.status(200).json(out);
+    } catch (err) {
+        next(err);
+    }
+
 });
 
 router.post('/account', (req, res) => {
     authenticateUser(req, res, account);
 });
 
-function account(req, res, user) {
+async function account(req, res, user) {
     // TODO: check for duplicate emails
 
     verifyPassword(user.username, String(req.body.currentPassword))
@@ -308,10 +382,10 @@ function account(req, res, user) {
                 if (errors.length) {
                     return res.status(400).json({ errors });
                 }
-                
-                bcrypt.genSalt(10, (err, salt) => {
-                    bcrypt.hash(newPassword, salt, (err, hash) => {
-                        user.password = hash;
+
+                bcrypt.genSalt(10, async (err, salt) => {
+                    bcrypt.hash(newPassword, salt, async (err, hash) => {
+                        user.passwordHash = hash;
                         awesomeLog(req, `Changing PW - ${user.username}`);
 
                         if (req.body.newEmail) {
@@ -319,14 +393,22 @@ function account(req, res, user) {
                             awesomeLog(req, `Changing Email - ${user.username}`);
                         }
 
-                        db.users.save(user);
+                        await prisma.user.update({
+                            where: { id: user.id },
+                            data: {
+                                passwordHash: user.passwordHash,
+                                email: user.email,
+                            },
+                        })
                         return res.status(200).json({ message: 'success' });
                     });
                 });
             } else if (req.body.newEmail) {
-                user.email = String(req.body.newEmail);
                 awesomeLog(req, `Changing Email - ${user.username}`);
-                db.users.save(user);
+                prisma.user.update({
+                    where: { id: user.id },
+                    data: { email: String(req.body.newEmail) },
+                })
                 return res.status(200).json({ message: 'success' });
             }
         })
@@ -335,22 +417,30 @@ function account(req, res, user) {
         });
 }
 
-router.post('/delete-account', (req, res) => {
-    authenticateUser(req, res, deleteAccount);
+router.post('/delete-account', (req, res, next) => {
+    authenticateUser(req, res, next, deleteAccount);
 });
 
-function deleteAccount(req, res, user) {
+async function deleteAccount(req, res, user) {
     verifyPassword(user.username, String(req.body.password))
-        .then((user) => {
+        .then(async (user) => {
             if (req.body.username !== user.username) {
                 return Promise.reject(new Error('An error occurred, please try logging out and in again.'));
             }
 
-            db.users.remove(user, true);
+            try {
+                await prisma.user.delete({ where: { id: user.id } });
+                loadMongoUser(req, res, user, async (mongoUser) => {
+                    await db.users.remove(mongoUser, true);
+                })
+            } catch (err) {
+                return res.status(500).json({ message: 'An error occurred, please try again later.'});
+            }
 
             return res.status(200).json({ message: 'success' });
         })
         .catch((err) => {
+            awesomeLog(req, err);
             res.status(400).json({ errors: [{ field: 'currentPassword', message: 'Your current password is incorrect.' }] });
         });
 }
