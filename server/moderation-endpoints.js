@@ -1,99 +1,103 @@
 const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
-const path = require('path');
 const express = require('express');
-const generate = require('nanoid/generate');
 
 const router = express.Router();
-const fs = require('fs');
-const request = require('request');
-const formidable = require('formidable');
-const mongojs = require('mongojs');
 const config = require('config');
 const awesomeLog = require('./log.js');
 
+const mongojs = require('mongojs');
 const collections = ['users', 'libraries'];
 const db = mongojs(config.get('databaseUrl'), collections);
 
-const { authenticateModerator, verifyPassword } = require('./auth.js');
+const { PrismaClient } = require("@prisma/client")
+const prisma = new PrismaClient()
 
-const moderatorList = config.get('moderators')
+const { authenticateModerator, getMongoUser } = require('./auth.js');
 
-router.get('/moderation/search', (req, res) => {
-    authenticateModerator(req, res, search);
+router.get('/moderation/search', (req, res, next) => {
+    authenticateModerator(req, res, next, search);
 });
 
-function search(req, res) {
+async function search(req, res) {
     let searchQuery = String(req.query.q).toLowerCase().trim();
-    const nameSearch = new Promise((resolve, reject) => {
-        db.users.find({ 'username': {'$regex': `^${searchQuery}.*`, '$options': 'si'} }, (err, users) => {
-            if (err) {
-                return reject(err);
-            }
-            return resolve(users);
-        });
-    })
+    users = await prisma.user.findMany({
+        where: {
+            OR: [
+                {
+                    username: {
+                        startsWith: searchQuery,
+                        mode: "insensitive",
+                    },
+                },
+                {
+                    email: {
+                        contains: searchQuery,
+                        mode: "insensitive",
+                    },
+                },
+            ],
+        },
+        orderBy: {
+            username: 'asc',
+        }
+    });
 
-    const emailSearch = new Promise((resolve, reject) => {
-        db.users.find({ 'email': {'$regex': `/${searchQuery}/`, '$options': 'si'} }, (err, users) => {
-            if (err) {
-                return reject(err);
-            }
-            return resolve(users);
-        });
-    })
 
-    Promise.all([nameSearch, emailSearch])
-    .then(([nameResult, emailResult]) => {
-        const allResults = [].concat(nameResult).concat(emailResult)
-        .map((user) => {
-            return {
-                username: user.username,
-                library: user.library,
-                email: user.email,
-            }
-        });
 
-        res.json({results: allResults});
-    })
-    .catch((err) => {
-        console.log(err);
-        res.status(500).json({message: err});
-    })
-    
+    await db.users.find({ username: { $in: users.map((user) => user.username) } }).sort({username: 1}, (err, mongoUsers) => {
+        out = []
+        pgIndex = 0;
+        mongoIndex = 0;
+        for (; pgIndex < users.length && mongoIndex < mongoUsers.length; pgIndex++) {
+            pUser = users[pgIndex];
+            for (; mongoIndex < mongoUsers.length; mongoIndex++) {
+                mUser = mongoUsers[mongoIndex]
+                if (pUser.username == mUser.username) {
+                    out.push({
+                        username: pUser.username,
+                        email: pUser.email,
+                        library: mUser.library,
+                    })
+                } else {
+                    awesomeLog(req, `No mongo user found for Postgres user ${pUser.username}`);
+                }
+            }
+        }
+
+        res.json({results: out});
+    });
 }
 
 
-router.post('/moderation/reset-password', (req, res) => {
-    authenticateModerator(req, res, resetPassword);
+router.post('/moderation/reset-password', (req, res, next) => {
+    authenticateModerator(req, res, next, resetPassword);
 });
 
-function resetPassword(req, res, user) {
+async function resetPassword(req, res, next) {
     let username = String(req.body.username).toLowerCase().trim();
-    console.log(username);
+    let user = await prisma.user.findUnique({ where: { username } });
 
-    db.users.find({ username }, (err, users) => {
-        if (err) {
-            awesomeLog(req, `MODERATION Reset password lookup error for:${username}`);
-            return res.status(500).json({ message: 'An error occurred' });
-        } if (!users.length) {
-            awesomeLog(req, `MODERATION Reset password for unknown user:${username}`);
-            return res.status(500).json({ message: 'An error occurred.' });
-        }
-        const user = users[0];
-        require('crypto').randomBytes(12, (ex, buf) => {
-            const newPassword = buf.toString('hex');
+    if (!user) {
+        awesomeLog(req, `MODERATION Reset password for unknown user:${username}`);
+        return res.status(500).json({ message: 'An error occurred.' });
+    }
 
-            bcrypt.genSalt(10, (err, salt) => {
-                bcrypt.hash(newPassword, salt, (err, hash) => {
-                    user.password = hash;
-                    db.users.save(user);
-                    const out = { newPassword };
-                    awesomeLog(req, `MODERATION password changed for user:${username}`);
-                    return res.status(200).json(out);
-                });
+    require('crypto').randomBytes(12, async (ex, buf) => {
+        const newPassword = buf.toString('hex');
+
+        bcrypt.genSalt(10, async (err, salt) => {
+            bcrypt.hash(newPassword, salt, async (err, hash) => {
+
+                await prisma.user.update({
+                    where: { id: user.id },
+                    data: { passwordHash: hash },
+                })
+
+                const out = { newPassword };
+                awesomeLog(req, `MODERATION password changed for user:${username}`);
+                return res.status(200).json(out);
             });
-        })
+        });
     });
 }
 

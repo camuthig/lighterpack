@@ -12,7 +12,7 @@ const mongojs = require('mongojs');
 const config = require('config');
 const awesomeLog = require('./log.js');
 
-const { authenticateUser, verifyPassword } = require('./auth.js');
+const { authenticateUser, loadMongoUser, verifyPassword } = require('./auth.js');
 
 if (config.get('mailgunAPIKey')) {
     var mailgun = require('mailgun-js')({ apiKey: config.get('mailgunAPIKey'), domain: config.get('mailgunDomain') });
@@ -141,22 +141,9 @@ async function registerUser(req, res) {
     });
 }
 
-router.post('/signin', (req, res) => {
-    authenticateUser(req, res, returnLibrary);
+router.post('/signin', (req, res, next) => {
+    authenticateUser(req, res, next, returnLibrary);
 });
-
-function loadMongoUser(req, res, user, callback) {
-    db.users.find({ username: user.username }, (err, users) => {
-        if (err) {
-            awesomeLog(req, `Error loading user from Mongo:${user.username}`);
-            return res.status(500).json({ message: 'An error occurred, please try again later.' });
-        } if (!users || !users.length) {
-            awesomeLog(req, `User not found in Mongo:${user.username}`);
-            return res.status(404).json({ message: 'An error occurred. Please try refreshing your page.' });
-        }
-        callback(users[0]);
-    });
-}
 
 function returnLibrary(req, res, user) {
     awesomeLog(req, user.username);
@@ -170,8 +157,8 @@ function returnLibrary(req, res, user) {
     });
 }
 
-router.post('/saveLibrary', (req, res) => {
-    authenticateUser(req, res, saveLibrary);
+router.post('/saveLibrary', (req, res, next) => {
+    authenticateUser(req, res, next, saveLibrary);
 });
 
 function saveLibrary(req, res, user) {
@@ -208,8 +195,8 @@ function saveLibrary(req, res, user) {
     });
 }
 
-router.post('/externalId', (req, res) => {
-    authenticateUser(req, res, externalId);
+router.post('/externalId', (req, res, next) => {
+    authenticateUser(req, res, next, externalId);
 });
 
 function externalId(req, res, user) {
@@ -362,8 +349,8 @@ router.post('/forgotUsername', async (req, res, next) => {
 
 });
 
-router.post('/account', (req, res) => {
-    authenticateUser(req, res, account);
+router.post('/account', (req, res, next) => {
+    authenticateUser(req, res, next, account);
 });
 
 async function account(req, res, user) {

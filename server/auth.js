@@ -5,6 +5,7 @@ const awesomeLog = require('./log.js');
 
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const mongojs = require('mongojs');
 
 const moderatorList = config.get('moderators')
 
@@ -13,16 +14,24 @@ const { PrismaClient } = require("@prisma/client")
 
 const prisma = new PrismaClient()
 
+
+const collections = ['users', 'libraries'];
+const db = mongojs(config.get('databaseUrl'), collections);
+
 // one day in many years this can go away.
 eval(`${fs.readFileSync(path.join(__dirname, './sha3.js'))}`);
 
-const authenticateModerator = function(req, res, callback) {
-    authenticateUser(req, res, (req, res, user) => {
-        if (!isModerator(user.username)) {
-            return res.status(403).json({ message: 'Denied.' });
-        }
-        callback(req, res, user);
-    });
+const authenticateModerator = function(req, res, next, callback) {
+    try {
+        authenticateUser(req, res, next, (req, res, user) => {
+            if (!isModerator(user.username)) {
+                return res.status(403).json({ message: 'Denied.' });
+            }
+            callback(req, res, user);
+        });
+    } catch (err) {
+        next(err);
+    }
 }
 
 const authenticateUser = async function(req, res, next, callback) {
@@ -136,10 +145,44 @@ function isModerator(username) {
     return moderatorList.indexOf(username) > -1;
 }
 
+async function loadMongoUser(req, res, user, callback) {
+    db.users.find({ username: user.username }, (err, users) => {
+        if (err) {
+            awesomeLog(req, `Error loading user from Mongo:${user.username}`);
+            return res.status(500).json({ message: 'An error occurred, please try again later.' });
+        } if (!users || !users.length) {
+            awesomeLog(req, `User not found in Mongo:${user.username}`);
+            return res.status(404).json({ message: 'An error occurred. Please try refreshing your page.' });
+        }
+        return callback(users[0]);
+    });
+}
+
+function getMongoUser(req, res, user) {
+    console.log('returning promise');
+    return db.users.find({ username: user.username }, (err, users) => {
+        console.log('inside promise');
+        if (err) {
+            throw err;
+        }
+
+        if (!users || !users.length) {
+            awesomeLog(req, `User not found in Mongo:${user.username}`);
+            return null;
+        }
+
+        console.log(users[0]);
+
+        return users[0];
+    });
+}
+
 module.exports = {
     authenticateModerator,
     authenticateUser,
     verifyPassword,
     generateSession,
     isModerator,
+    loadMongoUser,
+    getMongoUser,
 };
