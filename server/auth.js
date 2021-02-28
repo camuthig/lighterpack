@@ -159,9 +159,7 @@ async function loadMongoUser(req, res, user, callback) {
 }
 
 function getMongoUser(req, res, user) {
-    console.log('returning promise');
     return db.users.find({ username: user.username }, (err, users) => {
-        console.log('inside promise');
         if (err) {
             throw err;
         }
@@ -170,8 +168,6 @@ function getMongoUser(req, res, user) {
             awesomeLog(req, `User not found in Mongo:${user.username}`);
             return null;
         }
-
-        console.log(users[0]);
 
         return users[0];
     });
