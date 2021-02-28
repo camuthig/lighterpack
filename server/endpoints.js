@@ -152,7 +152,6 @@ function returnLibrary(req, res, user) {
             mongoUser.syncToken = 0;
             db.users.save(mongoUser);
         }
-        awesomeLog(req, mongoUser)
         return res.json({ username: user.username, library: JSON.stringify(mongoUser.library), syncToken: mongoUser.syncToken });
     });
 }
