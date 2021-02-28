@@ -11,9 +11,7 @@ const moderatorList = config.get('moderators')
 
 
 const { PrismaClient } = require("@prisma/client")
-
 const prisma = new PrismaClient()
-
 
 const collections = ['users', 'libraries'];
 const db = mongojs(config.get('databaseUrl'), collections);
