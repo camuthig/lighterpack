@@ -35,12 +35,7 @@ const Library = dataTypes.Library;
 eval(`${fs.readFileSync(path.join(__dirname, './sha3.js'))}`);
 
 router.post('/register', async (req, res) => {
-    try {
-        registerUser(req, res);
-    } catch (err) {
-        next(err);
-    }
-
+    registerUser(req, res);
 });
 
 async function registerUser(req, res) {
@@ -141,8 +136,8 @@ async function registerUser(req, res) {
     });
 }
 
-router.post('/signin', (req, res, next) => {
-    authenticateUser(req, res, next, returnLibrary);
+router.post('/signin', async (req, res) => {
+    authenticateUser(req, res, returnLibrary);
 });
 
 function returnLibrary(req, res, user) {
@@ -156,8 +151,8 @@ function returnLibrary(req, res, user) {
     });
 }
 
-router.post('/saveLibrary', (req, res, next) => {
-    authenticateUser(req, res, next, saveLibrary);
+router.post('/saveLibrary', (req, res) => {
+    authenticateUser(req, res, saveLibrary);
 });
 
 function saveLibrary(req, res, user) {
@@ -194,8 +189,8 @@ function saveLibrary(req, res, user) {
     });
 }
 
-router.post('/externalId', (req, res, next) => {
-    authenticateUser(req, res, next, externalId);
+router.post('/externalId', (req, res) => {
+    authenticateUser(req, res, externalId);
 });
 
 function externalId(req, res, user) {
@@ -287,69 +282,64 @@ router.post('/forgotPassword', async (req, res) => {
     });
 });
 
-router.post('/forgotUsername', async (req, res, next) => {
-    try {
-        let email = String(req.body.email).toLowerCase().trim();
-        if (!email || email.length < 1) {
-            awesomeLog(req, `Bad forgot username:${email}`);
-            return res.status(400).json({ errors: [{ message: 'Please enter a valid email.' }] });
-        }
-
-        let user = null;
-
-        try {
-            user = await prisma.user.findFirst({
-                where: {
-                    email: email,
-                },
-            });
-        } catch (err) {
-            awesomeLog(req, `Forgot email lookup error for:${email}`);
-            return res.status(500).json({ message: 'An error occurred' });
-        }
-
-        if (!user) {
-            awesomeLog(req, `Forgot email for unknown user:${email}`);
-            return res.status(400).json({ message: 'An error occurred' });
-        }
-
-        const username = user.username;
-
-        const message = `Hello ${username},\n Apparently you forgot your username. Here It is: \n\n Username: ${username}\n\n If you continue to have problems, please reply to this email with details.\n\n Thanks!`;
-
-        const mailOptions = {
-            from: 'LighterPack <info@mg.lighterpack.com>',
-            to: email,
-            "h:Reply-To": "LighterPack <info@lighterpack.com>",
-            subject: 'Your LighterPack username',
-            text: message,
-        };
-
-        awesomeLog(req, `Attempting to send username to:${email}`);
-        if (mailgun) {
-            try {
-                const response = await mailgun.messages().send(mailOptions);
-                awesomeLog(req, `Message sent: ${response.message}`);
-            } catch (err) {
-                awesomeLog(req, error);
-                return res.status(500).json({ message: 'An error occurred' });
-            }
-        } else {
-            awesomeLog(req, 'Not sending message because mailgun is not configured');
-            awesomeLog(req, mailOptions);
-        }
-
-        const out = { email };
-        awesomeLog(req, `sent username message for user:${username}`);
-        return res.status(200).json(out);
-    } catch (err) {
-        next(err);
+router.post('/forgotUsername', async (req, res) => {
+    let email = String(req.body.email).toLowerCase().trim();
+    if (!email || email.length < 1) {
+        awesomeLog(req, `Bad forgot username:${email}`);
+        return res.status(400).json({ errors: [{ message: 'Please enter a valid email.' }] });
     }
 
+    let user = null;
+
+    try {
+        user = await prisma.user.findFirst({
+            where: {
+                email: email,
+            },
+        });
+    } catch (err) {
+        awesomeLog(req, `Forgot email lookup error for:${email}`);
+        return res.status(500).json({ message: 'An error occurred' });
+    }
+
+    if (!user) {
+        awesomeLog(req, `Forgot email for unknown user:${email}`);
+        return res.status(400).json({ message: 'An error occurred' });
+    }
+
+    const username = user.username;
+
+    const message = `Hello ${username},\n Apparently you forgot your username. Here It is: \n\n Username: ${username}\n\n If you continue to have problems, please reply to this email with details.\n\n Thanks!`;
+
+    const mailOptions = {
+        from: 'LighterPack <info@mg.lighterpack.com>',
+        to: email,
+        "h:Reply-To": "LighterPack <info@lighterpack.com>",
+        subject: 'Your LighterPack username',
+        text: message,
+    };
+
+    awesomeLog(req, `Attempting to send username to:${email}`);
+    if (mailgun) {
+        try {
+            const response = await mailgun.messages().send(mailOptions);
+            awesomeLog(req, `Message sent: ${response.message}`);
+        } catch (err) {
+            awesomeLog(req, error);
+            return res.status(500).json({ message: 'An error occurred' });
+        }
+    } else {
+        awesomeLog(req, 'Not sending message because mailgun is not configured');
+        awesomeLog(req, mailOptions);
+    }
+
+    const out = { email };
+    awesomeLog(req, `sent username message for user:${username}`);
+    return res.status(200).json(out);
 });
 
-router.post('/account', (req, res, next) => {
-    authenticateUser(req, res, next, account);
+router.post('/account', (req, res) => {
+    authenticateUser(req, res, account);
 });
 
 async function account(req, res, user) {
@@ -403,8 +393,8 @@ async function account(req, res, user) {
         });
 }
 
-router.post('/delete-account', (req, res, next) => {
-    authenticateUser(req, res, next, deleteAccount);
+router.post('/delete-account', (req, res) => {
+    authenticateUser(req, res, deleteAccount);
 });
 
 async function deleteAccount(req, res, user) {

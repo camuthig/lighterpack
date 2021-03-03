@@ -19,20 +19,16 @@ const db = mongojs(config.get('databaseUrl'), collections);
 // one day in many years this can go away.
 eval(`${fs.readFileSync(path.join(__dirname, './sha3.js'))}`);
 
-const authenticateModerator = function(req, res, next, callback) {
-    try {
-        authenticateUser(req, res, next, (req, res, user) => {
-            if (!isModerator(user.username)) {
-                return res.status(403).json({ message: 'Denied.' });
-            }
-            callback(req, res, user);
-        });
-    } catch (err) {
-        next(err);
-    }
+const authenticateModerator = function(req, res, callback) {
+    authenticateUser(req, res, (req, res, user) => {
+        if (!isModerator(user.username)) {
+            return res.status(403).json({ message: 'Denied.' });
+        }
+        callback(req, res, user);
+    });
 }
 
-const authenticateUser = async function(req, res, next, callback) {
+const authenticateUser = async function(req, res, callback) {
     if (!req.cookies.lp && (!req.body.username || !req.body.password)) {
         return res.status(401).json({ message: 'Please log in.' });
     }
@@ -59,11 +55,7 @@ const authenticateUser = async function(req, res, next, callback) {
             return res.status(404).json({ message: 'Please log in again.' });
         }
 
-        try {
-            callback(req, res, user);
-        } catch (err) {
-            next(err);
-        }
+        callback(req, res, user);
     }
 }
 

@@ -14,8 +14,8 @@ const prisma = new PrismaClient()
 
 const { authenticateModerator, getMongoUser } = require('./auth.js');
 
-router.get('/moderation/search', (req, res, next) => {
-    authenticateModerator(req, res, next, search);
+router.get('/moderation/search', (req, res) => {
+    authenticateModerator(req, res, search);
 });
 
 async function search(req, res) {
@@ -69,11 +69,11 @@ async function search(req, res) {
 }
 
 
-router.post('/moderation/reset-password', (req, res, next) => {
-    authenticateModerator(req, res, next, resetPassword);
+router.post('/moderation/reset-password', (req, res) => {
+    authenticateModerator(req, res, resetPassword);
 });
 
-async function resetPassword(req, res, next) {
+async function resetPassword(req, res) {
     let username = String(req.body.username).toLowerCase().trim();
     let user = await prisma.user.findUnique({ where: { username } });
 

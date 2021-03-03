@@ -6,6 +6,9 @@ const compression = require('compression');
 const config = require('config');
 const express = require('express');
 
+// Require to automatically handle async/await errors. Unnecessary once Express is updated to version 5+.
+require('express-async-errors');
+
 const app = express();
 app.enable('trust proxy');
 const oneDay = 86400000;
@@ -30,7 +33,7 @@ app.use('/', views);
 
 app.use((err, req, res, next) => {
     awesomeLog(req, err.stack);
-    res.status(500).json({ message: 'An error occurred, please try again later.'});
+    return res.status(500).json({ message: 'An error occurred, please try again later.'});
 })
 
 console.log('-------');
