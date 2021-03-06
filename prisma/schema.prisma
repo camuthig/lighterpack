@@ -7,13 +7,71 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Nullable relations and IDs are needed to support cascade delete at this time.
+//  see: https://github.com/prisma/prisma/discussions/2149
+
 model User {
-  id                Int                @id @default(autoincrement())
-  username          String             @unique
-  email             String
-  passwordHash      String             @map(name: "password_hash")
-  token             String?            @unique
-  syncToken         Int?               @map(name: "sync_token")
+  id           Int     @id @default(autoincrement())
+  username     String  @unique
+  email        String
+  passwordHash String  @map(name: "password_hash")
+  token        String? @unique
+  syncToken    Int?    @map(name: "sync_token")
+  appVersion   String  @default("2") @map(name: "app_version")
+
+  gearLists GearList[]
 
   @@map(name: "users")
+}
+
+model GearList {
+  id                    Int    @id @default(autoincrement())
+  name                  String @default("")
+  description           String @default("")
+  totalWeight           Float  @default(0.0) @map(name: "total_weight")
+  totalWornWeight       Float  @default(0.0) @map(name: "total_worn_weight")
+  totalConsumableWeight Float  @default(0.0) @map(name: "total_consumable_weight")
+  totalBaseWeight       Float  @default(0.0) @map(name: "total_base_weight")
+  totalPackWeight       Float  @default(0.0) @map(name: "total_pack_weight")
+  totalPrice            Float  @default(0.0) @map(name: "total_price")
+  totalConsumablePrice  Float  @default(0.0) @map(name: "total_consumable_price")
+  totalQuantity         Int    @default(0) @map(name: "total_quantity")
+
+  user   User? @relation(fields: [userId], references: [id])
+  userId Int?  @map(name: "user_id")
+
+  categories Category[]
+
+  @@map(name: "gear_lists")
+}
+
+// WIP Do I really need the "subtotal" prefix on these values? probably not
+model Category {
+  id                       Int       @id @default(autoincrement())
+  name                     String    @default("")
+  subtotalWeight           Float     @default(0.0) @map(name: "subtotal_weight")
+  subtotalWornWeight       Float     @default(0.0) @map(name: "subtotal_worn_weight")
+  subtotalConsumableWeight Float     @default(0.0) @map(name: "subtotal_consumable_weight")
+  subtotalPrice            Float     @default(0.0) @map(name: "subtotal_price")
+  subtotalConsumablePrice  Float     @default(0.0) @map(name: "subtotal_consumable_price")
+  subtotalQuantity         Int       @default(0) @map(name: "subtotal_quantity")
+
+  gearList                 GearList? @relation(fields: [gearListId], references: [id])
+  gearListId               Int?      @map("gear_list_id")
+
+  position CategoryPosition?
+
+  @@map(name: "categories")
+}
+
+// WIP Does this need a reference to the gear list as well? A category can
+//  only belong to a single gear list, so probably not. It is implicit.
+model CategoryPosition {
+  id         Int       @id @default(autoincrement())
+  position   Int
+
+  category   Category? @relation(fields: [categoryId], references: [id])
+  categoryId Int?
+
+  @@map(name: "category_positions")
 }
